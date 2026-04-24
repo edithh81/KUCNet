@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from torchdrug.layers import functional
-from torch_scatter import scatter
+import torchdrug_shim as functional
+from scatter_shim import scatter
 from ppr import get_ppr
 import numpy as np
 import time
@@ -46,7 +46,7 @@ class GNNLayer(torch.nn.Module):
             qv = edges[:,3].view(-1,1)
             u_v = torch.cat((qu,qv),1)
 
-            probs = self.ppr[u_v[:,0],u_v[:,1]].cuda()
+            probs = self.ppr[u_v[:,0].cpu(), u_v[:,1].cpu()].cuda()
             topk_value, topk_index = functional.variadic_topk(probs, counts, k=max_ent_per_rel)
             
             cnt_sum = torch.cumsum(counts,dim=0)

@@ -1,0 +1,9 @@
+# Tested with Python 3.12 and PyTorch 2.8.0
+# torch_scatter is optional — if unavailable, scatter_shim.py provides a
+# native-PyTorch fallback (slower, but works).
+torch==2.8.0
+numpy>=1.26,<3
+scipy>=1.11
+tqdm>=4.62
+# Optional — matching CUDA/torch wheel:
+# torch_scatter==2.1.2

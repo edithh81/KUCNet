@@ -7,7 +7,7 @@ from base_model import BaseModel
 
 parser = argparse.ArgumentParser(description="Parser for KUCNet")
 parser.add_argument('--data_path', type=str, default='data/last-fm/')
-parser.add_argument('--seed', type=str, default=1234)
+parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--K', type=int, default=50)
 parser.add_argument('--gpu', type=int, default=0)
 

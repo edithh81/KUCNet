@@ -26,7 +26,7 @@ def ndcg_k(r, k, len_pos_test):
 
 def dcg_k(r, k):
 
-    r = np.asfarray(r)[:k]
+    r = np.asarray(r, dtype=float)[:k]
     return np.sum(r / np.log2(np.arange(2, r.size + 2)))
 
 
