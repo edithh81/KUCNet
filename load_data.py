@@ -286,7 +286,11 @@ class DataLoader:
         if data=='train':                                   
             query, answer, wrongs = np.array(self.train_q), self.train_a, self.train_w
         if data=='test':
-            query, answer = np.array(self.test_q), np.array(self.test_a)
+            # self.test_a is a ragged list (per-user pos items, variable length).
+            # NumPy >= 1.24 refuses np.array(ragged) without dtype=object, and
+            # the only usage below (`answer[batch_idx[i]]`) is plain list indexing,
+            # so keep it as a list.
+            query, answer = np.array(self.test_q), self.test_a
 
         subs = []
         rels = []
