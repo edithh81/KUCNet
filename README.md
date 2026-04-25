@@ -51,11 +51,29 @@ python train.py --data_path=data/Dis_5fold_user/
 
 Results land in `results/`.
 
-## PPR computation device
+## PPR preprocessing
 
-`get_ppr()` in `ppr.py` now accepts an optional `device=` argument (defaults
-to `cuda` if available, else `cpu`). This lets you run the power-iteration on
-either GPU (fast) or CPU (when GPU memory is the bottleneck).
+`ppr.py` was rewritten to be substantially faster than the original
+sparse-rank power-iteration:
+
+  * dense `rank` vector → sparse-dense `torch.sparse.mm` (vs. sparse-sparse);
+  * out-degrees via `torch.bincount` (vs. `unique + counts`);
+  * personalisation matrix `P` filled via `Tensor.fill_` and indexed write
+    instead of repeated `torch.cat` of growing index/value tensors;
+  * early stop when `||next_rank − rank||₂ < tol`;
+  * automatic CPU fallback on CUDA OOM / cublas / cusparse errors.
+
+The default return shape and dtype are unchanged (dense
+`[n_users, n_nodes]` `float32` CPU tensor) — `models.py` keeps working
+without modification.
+
+`get_ppr()` accepts:
+
+  * `device=` — `'cuda' | 'cpu' | 'auto' | None` (default: cuda if available);
+  * `topk=K` — return only the top-K per user as a dict (memory-saving
+    mode; requires corresponding model-side changes);
+  * `compute_dtype=` / `cache_dtype=` — defaults `float32`;
+  * `bs`, `N`, `alpha`, `beta`, `tol`, `fallback_to_cpu`.
 
 ## Benchmarking (efficiency table)
 
