@@ -92,10 +92,10 @@ def _run_ppr_once(
     keep_topk = topk is not None and int(topk) > 0 and int(topk) < n_nodes
     if keep_topk:
         k = int(topk)
-        final_indices = torch.empty((n_users, k), dtype=torch.int32)
-        final_scores = torch.empty((n_users, k), dtype=cache_dtype)
+        final_indices = torch.empty((n_users, k), dtype=torch.int32, device=device)
+        final_scores = torch.empty((n_users, k), dtype=cache_dtype, device=device)
     else:
-        final_rank = torch.empty((n_users, n_nodes), dtype=cache_dtype)
+        final_rank = torch.empty((n_users, n_nodes), dtype=cache_dtype, device=device)
 
     n_batch = n_users // bs + int(n_users % bs > 0)
     s_time = time.time()
@@ -139,7 +139,7 @@ def _run_ppr_once(
                 break
             rank = next_rank
 
-        rank_t = rank.transpose(0, 1).cpu()  # [tbs, n_nodes]
+        rank_t = rank.transpose(0, 1)  # [tbs, n_nodes]
         if keep_topk:
             scores, idx = torch.topk(rank_t.float(), k=k, dim=1)
             final_indices[start:end] = idx.to(dtype=torch.int32)
@@ -148,7 +148,7 @@ def _run_ppr_once(
             final_rank[start:end] = rank_t.to(dtype=cache_dtype)
 
         if device.type == "cuda":
-            del rank, P, rank_t
+            del rank, P
             torch.cuda.empty_cache()
 
     print(f"PPR done on {device.type}. time: {time.time() - s_time:.1f}s")

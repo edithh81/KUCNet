@@ -254,28 +254,101 @@ class DataLoader:
             answers.append(np.array(trip_hr[key]))
         return queries, answers
 
+    def _build_gpu_csr(self, KG_np):
+        """Precompute a GPU-resident CSR adjacency list sorted by head node.
+
+        Stored as int32 to halve VRAM relative to int64.  All node/relation
+        indices for the supported datasets fit comfortably in int32.
+        """
+        heads  = KG_np[:, 0].astype(np.int32)
+        order  = np.argsort(heads, kind='stable')
+        kg_s   = KG_np[order].astype(np.int32)          # [E, 3]  head/rel/tail
+
+        counts = np.bincount(heads.astype(np.int64), minlength=self.n_nodes)
+        indptr = np.zeros(self.n_nodes + 1, dtype=np.int64)
+        indptr[1:] = np.cumsum(counts)
+
+        return {
+            'kg':     torch.from_numpy(kg_s).cuda(),           # [E, 3] int32
+            'indptr': torch.from_numpy(indptr).cuda(),         # [n_nodes+1] int64
+        }
+
+    def _get_neighbors_gpu(self, nodes_np, adj):
+        """GPU-native neighbor fetch: no scipy, no CPU↔GPU round-trip per layer."""
+        nodes_t  = torch.from_numpy(nodes_np).long().cuda()
+        batch_ids = nodes_t[:, 0]
+        node_ids  = nodes_t[:, 1]
+
+        indptr = adj['indptr']
+        kg     = adj['kg']           # int32 [E, 3]: head, rel, tail
+
+        starts = indptr[node_ids]
+        ends   = indptr[node_ids + 1]
+        counts = ends - starts
+
+        total = int(counts.sum().item())
+        if total == 0:
+            empty = torch.zeros((0, 2), dtype=torch.long, device='cuda')
+            return empty, torch.zeros((0, 6), dtype=torch.long, device='cuda'), \
+                   torch.zeros(0, dtype=torch.long, device='cuda')
+
+        rep_batch = torch.repeat_interleave(batch_ids, counts)
+
+        # exclusive cumsum gives the within-batch starting position for each node
+        cum_starts = torch.zeros_like(counts)
+        if counts.numel() > 1:
+            cum_starts[1:] = counts[:-1].cumsum(0)
+
+        local_pos = (torch.arange(total, device='cuda')
+                     - torch.repeat_interleave(cum_starts, counts))
+        row_idx   = torch.repeat_interleave(starts, counts) + local_pos
+
+        kg_rows       = kg[row_idx].long()          # [total, 3]: head, rel, tail
+        sampled_edges = torch.cat([rep_batch.unsqueeze(1), kg_rows], dim=1)
+
+        head_nodes, head_index = torch.unique(sampled_edges[:, [0, 1]], dim=0, sorted=True, return_inverse=True)
+        tail_nodes, tail_index = torch.unique(sampled_edges[:, [0, 3]], dim=0, sorted=True, return_inverse=True)
+
+        sampled_edges = torch.cat([sampled_edges, head_index.unsqueeze(1), tail_index.unsqueeze(1)], 1)
+
+        mask = sampled_edges[:, 2] == (self.n_rel * 2 + 2)
+        _, old_idx = head_index[mask].sort()
+        old_nodes_new_idx = tail_index[mask][old_idx]
+
+        return tail_nodes, sampled_edges, old_nodes_new_idx
+
     def get_neighbors(self, nodes, mode='train'):
-        
-        if mode=='train':
+        if torch.cuda.is_available():
+            # Lazy-build GPU CSR only for the mode that's actually used,
+            # so we don't pay double VRAM when only one mode is exercised.
+            if mode == 'train':
+                if not hasattr(self, '_gpu_adj_train') or self._gpu_adj_train is None:
+                    self._gpu_adj_train = self._build_gpu_csr(self.KG)
+                return self._get_neighbors_gpu(nodes, self._gpu_adj_train)
+            else:
+                if not hasattr(self, '_gpu_adj_test') or self._gpu_adj_test is None:
+                    self._gpu_adj_test = self._build_gpu_csr(self.tKG)
+                return self._get_neighbors_gpu(nodes, self._gpu_adj_test)
+
+        # CPU fallback (scipy path) — used when CUDA is not available.
+        if mode == 'train':
             KG = self.KG
             M_sub = self.M_sub
         else:
             KG = self.tKG
             M_sub = self.tM_sub
-        
-        # nodes: n(node) x 2 with (batch_idx, node_idx)
+
         node_1hot = csr_matrix((np.ones(len(nodes)), (nodes[:,1], nodes[:,0])), shape=(self.n_nodes, nodes.shape[0]))
         edge_1hot = M_sub.dot(node_1hot)
         edges = np.nonzero(edge_1hot)
-        sampled_edges = np.concatenate([np.expand_dims(edges[1],1), KG[edges[0]]], axis=1)     # (batch_idx, head, rela, tail)
+        sampled_edges = np.concatenate([np.expand_dims(edges[1],1), KG[edges[0]]], axis=1)
         sampled_edges = torch.LongTensor(sampled_edges).cuda()
 
-        # index to nodes
         head_nodes, head_index = torch.unique(sampled_edges[:,[0,1]], dim=0, sorted=True, return_inverse=True)
         tail_nodes, tail_index = torch.unique(sampled_edges[:,[0,3]], dim=0, sorted=True, return_inverse=True)
 
         sampled_edges = torch.cat([sampled_edges, head_index.unsqueeze(1), tail_index.unsqueeze(1)], 1)
-       
+
         mask = sampled_edges[:,2] == (self.n_rel*2 + 2)
         _, old_idx = head_index[mask].sort()
         old_nodes_new_idx = tail_index[mask][old_idx]

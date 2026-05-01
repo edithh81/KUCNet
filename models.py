@@ -37,21 +37,22 @@ class GNNLayer(torch.nn.Module):
         
         if id_layer > 0 and id_layer < n_layer - 1: 
             max_ent_per_rel = self.K
-            _, ind1 = torch.unique(edges[:,0:3],dim=0, sorted=True,return_inverse=True)
-            _, ind2 = torch.sort(ind1)
-            edges = edges[ind2]             # sort edges
+            # Sort edges by (batch, head, rel) with one argsort on a packed key,
+            # then a single unique to get group sizes — avoids a second unique call.
+            _max_rel  = 2 * self.n_rel + 4
+            _sort_key = (edges[:, 0] * (self.n_node + 1) + edges[:, 1]) * _max_rel + edges[:, 2]
+            ind2      = torch.argsort(_sort_key, stable=True)
+            edges     = edges[ind2]
             _, index, counts = torch.unique(edges[:,0:3], dim=0, return_inverse=True, return_counts=True)
 
             qu = q_sub[edges[:,0]].view(-1,1)
             qv = edges[:,3].view(-1,1)
             u_v = torch.cat((qu,qv),1)
 
-            probs = self.ppr[u_v[:,0].cpu(), u_v[:,1].cpu()].cuda()
+            probs = self.ppr[u_v[:,0], u_v[:,1]]
             topk_value, topk_index = functional.variadic_topk(probs, counts, k=max_ent_per_rel)
-            
-            cnt_sum = torch.cumsum(counts,dim=0)
-            cnt_sum[1:] = cnt_sum[:-1] + 0
-            cnt_sum[0] = 0
+
+            cnt_sum = torch.nn.functional.pad(counts[:-1].cumsum(0), (1, 0))
             topk_index = topk_index + cnt_sum.unsqueeze(1)
             
             mask = topk_index.view(-1,1).squeeze()
