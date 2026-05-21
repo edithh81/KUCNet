@@ -49,7 +49,13 @@ class GNNLayer(torch.nn.Module):
             qv = edges[:,3].view(-1,1)
             u_v = torch.cat((qu,qv),1)
 
-            probs = self.ppr[u_v[:,0], u_v[:,1]]
+            if isinstance(self.ppr, dict):
+                ppr_idx    = self.ppr['indices'][u_v[:, 0]].long()   # [E, k]
+                ppr_scores = self.ppr['scores'][u_v[:, 0]]           # [E, k]
+                hit        = (ppr_idx == u_v[:, 1].unsqueeze(1))     # [E, k]
+                probs      = (ppr_scores * hit).sum(dim=1)            # [E]
+            else:
+                probs = self.ppr[u_v[:,0], u_v[:,1]]
             topk_value, topk_index = functional.variadic_topk(probs, counts, k=max_ent_per_rel)
 
             cnt_sum = torch.nn.functional.pad(counts[:-1].cumsum(0), (1, 0))
@@ -119,7 +125,7 @@ class KUCNet_trans(torch.nn.Module):
         acts = {'relu': nn.ReLU(), 'tanh': torch.tanh, 'idd': lambda x:x} 
         act = acts[params.act]
         self.K = params.K
-        self.ppr = get_ppr(self.loader)
+        self.ppr = get_ppr(self.loader, topk=500, cache_dtype=torch.float16)
         self.gnn_layers = []
         for i in range(self.n_layer):
             self.gnn_layers.append(GNNLayer(self.hidden_dim, self.hidden_dim, self.attn_dim,self.n_users, self.n_items, self.n_rel, self.n_nodes, self.ppr, self.K,act=act))

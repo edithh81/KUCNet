@@ -28,11 +28,15 @@ if __name__ == '__main__':
         dataset = dataset[-2]
    
     results_dir = 'results'
+    ckpt_dir = os.path.join(results_dir, 'checkpoints')
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
+    if not os.path.exists(ckpt_dir):
+        os.makedirs(ckpt_dir)
 
     opts = Options
     opts.perf_file = os.path.join(results_dir,  dataset + '_perf.txt')
+    ckpt_path = os.path.join(ckpt_dir, dataset + '_best.pt')
 
     torch.cuda.set_device(args.gpu)
 
@@ -173,6 +177,15 @@ if __name__ == '__main__':
             best_recall = recall
             best_str = out_str
             print(str(epoch) + '\t' + best_str)
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.model.state_dict(),
+                'optimizer_state_dict': model.optimizer.state_dict(),
+                'best_recall': best_recall,
+                'ndcg': ndcg,
+                'config': config_str,
+            }, ckpt_path)
+            print('saved checkpoint to %s (recall=%.4f)' % (ckpt_path, best_recall))
     with open(opts.perf_file, 'a+') as f:
         f.write('best:\n'+best_str)
 

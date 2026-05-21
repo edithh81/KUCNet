@@ -127,8 +127,9 @@ def main():
     import models as _models_mod
     _orig_get_ppr = _models_mod.get_ppr
 
-    def _patched_get_ppr(loader):
-        return _orig_get_ppr(loader, device=args.ppr_device)
+    def _patched_get_ppr(loader, **kwargs):
+        kwargs.setdefault("device", args.ppr_device)
+        return _orig_get_ppr(loader, **kwargs)
 
     _models_mod.get_ppr = _patched_get_ppr
     try:
