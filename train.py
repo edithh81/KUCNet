@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import numpy as np
+from tqdm import tqdm
 from load_data import DataLoader
 from base_model import BaseModel
 
@@ -165,18 +166,21 @@ if __name__ == '__main__':
     model = BaseModel(opts, loader)
 
     best_recall = 0
-    for epoch in range(40):
-    
-        print('epoch ',epoch)
-        recall,ndcg, out_str = model.train_batch()
-        
+    epoch_bar = tqdm(range(40), desc='epochs', ncols=100)
+    for epoch in epoch_bar:
+        recall, ndcg, out_str = model.train_batch()
+
         with open(opts.perf_file, 'a+') as f:
             f.write(str(epoch) + out_str)
+
+        epoch_bar.set_postfix(recall=f'{recall:.4f}',
+                              ndcg=f'{ndcg:.4f}',
+                              best=f'{best_recall:.4f}')
 
         if recall > best_recall:
             best_recall = recall
             best_str = out_str
-            print(str(epoch) + '\t' + best_str)
+            tqdm.write('epoch %d new best: %s' % (epoch, best_str.strip()))
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.model.state_dict(),
@@ -185,7 +189,7 @@ if __name__ == '__main__':
                 'ndcg': ndcg,
                 'config': config_str,
             }, ckpt_path)
-            print('saved checkpoint to %s (recall=%.4f)' % (ckpt_path, best_recall))
+            tqdm.write('saved checkpoint to %s (recall=%.4f)' % (ckpt_path, best_recall))
     with open(opts.perf_file, 'a+') as f:
         f.write('best:\n'+best_str)
 

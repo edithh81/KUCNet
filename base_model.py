@@ -48,21 +48,20 @@ class BaseModel(object):
         
         t_time = time.time()
         self.model.train()
-        for i in range(n_batch):
+        pbar = tqdm(range(n_batch), desc='train', ncols=100)
+        for i in pbar:
             start = i*batch_size
             end = min(self.loader.n_train, (i+1)*batch_size)
             batch_idx = np.arange(start, end)
             subs, rels, pos, neg = self.loader.get_batch(batch_idx)
 
             self.model.zero_grad()
-            scores = self.model(subs, rels) 
-           
+            scores = self.model(subs, rels)
+
             loss = cal_bpr_loss(self.n_users, pos, neg, scores)
             loss.backward()
             self.optimizer.step()
 
-            if i % 1000 == 0 :
-                print('batch:',i, 'loss:', loss.item())
             # avoid NaN
             for p in self.model.parameters():
                 X = p.data.clone()
@@ -70,15 +69,15 @@ class BaseModel(object):
                 X[flag] = np.random.random()
                 p.data.copy_(X)
             epoch_loss += loss.item()
+            pbar.set_postfix(loss=f'{loss.item():.4f}', avg=f'{epoch_loss/(i+1):.4f}')
 
         self.t_time += time.time() - t_time
-        print('epoch_loss:',epoch_loss)
-        print('start test')
-        recall, ndcg, out_str = self.test_batch() 
-        
+        tqdm.write(f'epoch_loss: {epoch_loss:.4f}')
+        recall, ndcg, out_str = self.test_batch()
+
         self.loader.shuffle_train()
-        print(out_str)
-        return recall, ndcg,  out_str
+        tqdm.write(out_str.strip())
+        return recall, ndcg, out_str
 
     def test_one_user(self, u, score, K = 20):
         try:
@@ -122,26 +121,27 @@ class BaseModel(object):
         i_time = time.time()
         recall, ndcg = 0, 0
     
-        for id in range(n_batch):
+        n_users_seen = 0
+        pbar = tqdm(range(n_batch), desc='test', ncols=100)
+        for id in pbar:
             start = id*batch_size
             end = min(n_data, (id+1)*batch_size)
             batch_idx = np.arange(start, end)
             subs, rels, objs = self.loader.get_batch(batch_idx, data='test')
             scores = self.model(subs, rels, mode='test').data.cpu().numpy()
-        
+
             batch_recall, batch_ndcg = 0, 0
             for i in range(len(subs)):
                 u , u_score = subs[i], scores[i]
                 one_recall, one_ndcg = self.test_one_user(u, u_score)
                 batch_recall = batch_recall + one_recall
                 batch_ndcg = batch_ndcg + one_ndcg
-                
+
             recall = recall + batch_recall
             ndcg = ndcg + batch_ndcg
-            batch_recall = batch_recall / len(subs)
-            batch_ndcg = batch_ndcg / len(subs)
-            if id % 1000 == 0:
-                print(id, 'batch recall:', batch_recall, 'batch ndcg:', batch_ndcg)
+            n_users_seen += len(subs)
+            pbar.set_postfix(recall=f'{recall/n_users_seen:.4f}',
+                             ndcg=f'{ndcg/n_users_seen:.4f}')
 
         recall = recall / n_data
         ndcg = ndcg / n_data
